@@ -1,23 +1,21 @@
-## Everything in this file and any files in the R directory are sourced during `simInit()`;
-## all functions and objects are put into the `simList`.
-## To use objects, use `sim$xxx` (they are globally available to all modules).
-## Functions can be used inside any function that was sourced in this module;
-## they are namespaced to the module, just like functions in R packages.
-## If exact location is required, functions will be: `sim$.mods$<moduleName>$FunctionName`.
 defineModule(sim, list(
   name = "waterfowl",
-  description = "",
-  keywords = "",
-  authors = structure(list(list(given = c("First", "Middle"), family = "Last", role = c("aut", "cre"), email = "email@example.com", comment = NULL)), class = "person"),
+  description = paste0("This module forecasts waterfowl habitat suitability ",
+                       "index for 3 species of waterfowl for a given study ",
+                       "aerea within the Western Boreal Region"),
+  keywords = "WBI",
+  authors = structure(list(list(given = "Tati", family = "Micheletti", 
+                                role = c("aut", "cre"), 
+                                email = "tati.micheletti@gmail.com", 
+                                comment = NULL)), class = "person"),
   childModules = character(0),
   version = list(SpaDES.core = "1.0.5", waterfowl = "0.0.0.9000"),
   timeframe = as.POSIXlt(c(NA, NA)),
   timeunit = "year",
   citation = list("citation.bib"),
   documentation = deparse(list("README.txt", "waterfowl.Rmd")),
-  reqdPkgs = list(),
+  reqdPkgs = list("biomod2", "raster", "data.table", "googledrive"),
   parameters = rbind(
-    #defineParameter("paramName", "paramClass", value, min, max, "parameter description"),
     defineParameter(".plotInitialTime", "numeric", NA, NA, NA,
                     "Describes the simulation time at which the first plot event should occur."),
     defineParameter(".plotInterval", "numeric", NA, NA, NA,
@@ -29,171 +27,185 @@ defineModule(sim, list(
     defineParameter(".useCache", "logical", FALSE, NA, NA,
                     paste("Should this entire module be run with caching activated?",
                           "This is generally intended for data-type modules, where stochasticity",
-                          "and time are not relevant"))
+                          "and time are not relevant")),
+    defineParameter("predictionsDecades", "numeric", c(2050, 2070), NA, NA,
+                    paste0("Describes the simulation time interval between prediction events. ",
+                           "Defaults to 2050 and 2070 --> These are ensambles ",
+                           "but uses simulated data of the closest years ending in 1 to match the 10 year ",
+                           "interval of data saving")),
+    defineParameter("decadesMatchingYears", "numeric", c(2051, 2071), NA, NA,
+                    paste0("Years for which this module should run (i.e. ",
+                           "years that should match the predictionsDecades for which data ",
+                           "(cohort data and pixelGroup map) are available",
+                           "interval of data saving"))
   ),
   inputObjects = bindrows(
-    #expectsInput("objectName", "objectClass", "input object description", sourceURL, ...),
-    expectsInput(objectName = NA, objectClass = NA, desc = NA, sourceURL = NA)
+    expectsInput(objectName = "speciesURL", objectClass = "data.table", 
+                 desc = paste0("Data.table with 2 columns, species (4-letter code)",
+                               " and URL (url of google drive FOLDER where the ",
+                               "fitted models from biomod2 were saved). It is ",
+                               "important that the structure of the models is ",
+                               "kept intact as the predict function depends on ",
+                               "it."), 
+                 sourceURL = NA),
+    expectsInput(objectName = "species", objectClass = "character", 
+                 desc = paste0("Character vector with species (4-letter code). ",
+                               "These need to be available in speciesURL table."), 
+                 sourceURL = NA),
+    expectsInput(objectName = "studyArea", objectClass = "SpatialPolygonDataFrame", 
+                 desc = "Study area for the prediction. Currently only available for NWT", 
+                 sourceURL = "https://drive.google.com/open?id=1P4grDYDffVyVXvMjM-RwzpuH1deZuvL3"),
+    expectsInput(objectName = "rasterToMatch", objectClass = "RasterLayer",
+                 desc = "All spatial outputs will be reprojected and resampled to it", 
+                 sourceURL = "https://drive.google.com/open?id=1P4grDYDffVyVXvMjM-RwzpuH1deZuvL3")
   ),
   outputObjects = bindrows(
-    #createsOutput("objectName", "objectClass", "output object description", ...),
-    createsOutput(objectName = NA, objectClass = NA, desc = NA)
+    createsOutput(objectName = "biomassMap", objectClass = "RasterLayer", 
+                  desc = "Total biomass map"),
+    createsOutput(objectName = "cohortData", objectClass = "data.table", 
+                  desc = "Table with cohort information (biomass per species per pixelGroup)"),
+    createsOutput(objectName = "pixelGroupMap", objectClass = "RasterLayer", 
+                  desc = "Mapping raster to pixelGroup"),   
+    createsOutput(objectName = "waterfowlPredictions", objectClass = "RasterLayer", 
+                  desc = "Mapping raster to pixelGroup"),
+    createsOutput(objectName = "bioCov", objectClass = "RasterStack", 
+                  desc = "Mapping raster to pixelGroup") ,
+    createsOutput(objectName = "treeCov", objectClass = "RasterStack", 
+                  desc = "Mapping raster to pixelGroup")
   )
 ))
-
-## event types
-#   - type `init` is required for initialization
 
 doEvent.waterfowl = function(sim, eventTime, eventType) {
   switch(
     eventType,
     init = {
-      ### check for more detailed object dependencies:
-      ### (use `checkObject` or similar)
-
-      # do stuff for this event
-      sim <- Init(sim)
-
+      sim$.schedulingCounter <- 1
       # schedule future event(s)
-      sim <- scheduleEvent(sim, P(sim)$.plotInitialTime, "waterfowl", "plot")
-      sim <- scheduleEvent(sim, P(sim)$.saveInitialTime, "waterfowl", "save")
+      sim <- scheduleEvent(sim, P(sim)$decadesMatchingYears[sim$.schedulingCounter], "waterfowl", "modelsPrep")
+      sim <- scheduleEvent(sim, P(sim)$decadesMatchingYears[sim$.schedulingCounter], "waterfowl", "climateDataPrep")
+      sim <- scheduleEvent(sim, P(sim)$decadesMatchingYears[sim$.schedulingCounter], "waterfowl", "simulatedLayersPrep")
+      sim <- scheduleEvent(sim, P(sim)$decadesMatchingYears[sim$.schedulingCounter], "waterfowl", "predictions")
+      sim <- scheduleEvent(sim, P(sim)$decadesMatchingYears[sim$.schedulingCounter], "waterfowl", "updateScheduler")
     },
-    plot = {
-      # ! ----- EDIT BELOW ----- ! #
-      # do stuff for this event
-
-      #plotFun(sim) # uncomment this, replace with object to plot
+    modelsPrep = {
+      # Prepare models: download data and return paths
+      browser()
+      downloadWaterfowlModels(speciesURL = sim$speciesURL,
+                              dataFolder = dataPath(sim))
+    },
+    climateDataPrep = {
+      # Prepare climate data
+      sim$bioCov <- prepareBioCov(Decade = P(sim)$predictionsDecades[which(
+                        P(sim)$decadesMatchingYears[sim$.schedulingCounter] == time(sim))],
+                        climateModel = "CCSM4",
+                        pathInputs = Paths$inputPath,
+                        studyArea = sim$studyArea,
+                        rasterToMatch = sim$rasterToMatch) #TODO Add more climate scenarios
+      browser()
       # schedule future event(s)
-
-      # e.g.,
-      #sim <- scheduleEvent(sim, time(sim) + P(sim)$.plotInterval, "waterfowl", "plot")
-
-      # ! ----- STOP EDITING ----- ! #
+      sim <- scheduleEvent(sim, P(sim)$decadesMatchingYears[sim$.schedulingCounter + 1], "birdsNWT", "climateDataPrep")
     },
-    save = {
-      # ! ----- EDIT BELOW ----- ! #
-      # do stuff for this event
-
-      # e.g., call your custom functions/methods here
-      # you can define your own methods below this `doEvent` function
-
+    simulatedLayersPrep = {
+      # Prepare simulated layers
+      if (!is.null(sim$cohortData)){
+        mod$cohortData <- sim$cohortData
+      } else {
+        mod$cohortData <- createModObject(data = "cohortData", sim = sim,
+                                          pathInput = inputPath(sim), currentTime = time(sim))
+      }
+      
+      if (!is.null(sim$pixelGroupMap)){
+        mod$pixelGroupMap <- sim$pixelGroupMap
+      } else {
+        mod$pixelGroupMap <- createModObject(data = "pixelGroupMap", sim = sim, 
+                                             pathInput = inputPath(sim), currentTime = time(sim))
+      }
+      
+      if (!is.null(sim$simulatedBiomassMap)){
+        mod$simulatedBiomassMap <- sim$simulatedBiomassMap
+      } else {
+        mod$simulatedBiomassMap <- createModObject(data = "simulatedBiomassMap", sim = sim, 
+                                                   pathInput = inputPath(sim), currentTime = time(sim))
+      }
+      if (any(is.null(mod$pixelGroupMap), is.null(mod$cohortData), 
+              is.null(mod$simulatedBiomassMap))) {
+        stop(paste0("This module can't run without data. ",
+                    "Please make sure you are providing the correct path to ",
+                    "the cohortData and pixelGroupMap saved objects, and the ",
+                    "correct years for those in the parameter ",
+                    "'decadesMatchingYears'"))
+      }
+      sim$treeCov <-  prepareTreeCov(cohortData = mod$cohortData,
+                                     pixelGroupMap = mod$pixelGroupMap,
+                                     biomassMap = mod$simulatedBiomassMap)
       # schedule future event(s)
-
-      # e.g.,
-      # sim <- scheduleEvent(sim, time(sim) + P(sim)$.saveInterval, "waterfowl", "save")
-
-      # ! ----- STOP EDITING ----- ! #
+      sim <- scheduleEvent(sim, P(sim)$decadesMatchingYears[sim$.schedulingCounter + 1], "birdsNWT", "simulatedLayersPrep")
     },
-    event1 = {
-      # ! ----- EDIT BELOW ----- ! #
-      # do stuff for this event
-
-      # e.g., call your custom functions/methods here
-      # you can define your own methods below this `doEvent` function
-
+    predictions = {
+      sim$waterfowlPredictions <- lapply(sim$species, function(sp){
+        filePath <- file.path(dataPath(sim), sp)
+        pred <- predictBiomod(sp = sp, 
+                              inputPath = filePath,
+                              bioCov = sim$bioCov,
+                              treeCov = sim$treeCov)
+        return(pred)
+      })
+      names(sim$waterfowlPredictions) <- sim$species
+      
       # schedule future event(s)
-
-      # e.g.,
-      # sim <- scheduleEvent(sim, time(sim) + increment, "waterfowl", "templateEvent")
-
-      # ! ----- STOP EDITING ----- ! #
+      sim <- scheduleEvent(sim, P(sim)$decadesMatchingYears[sim$.schedulingCounter + 1], "birdsNWT", "predictions")
     },
-    event2 = {
-      # ! ----- EDIT BELOW ----- ! #
-      # do stuff for this event
-
-      # e.g., call your custom functions/methods here
-      # you can define your own methods below this `doEvent` function
-
-      # schedule future event(s)
-
-      # e.g.,
-      # sim <- scheduleEvent(sim, time(sim) + increment, "waterfowl", "templateEvent")
-
-      # ! ----- STOP EDITING ----- ! #
-    },
-    warning(paste("Undefined event type: \'", current(sim)[1, "eventType", with = FALSE],
+    updateScheduler = {
+      # First you schedule the event as the previous ones
+      sim <- scheduleEvent(sim, P(sim)$decadesMatchingYears[sim$.schedulingCounter + 1], "waterfowl", "updateScheduler")
+      # Then you update the counter
+      sim$.schedulingCounter <- sim$.schedulingCounter +1
+},
+  warning(paste("Undefined event type: \'", current(sim)[1, "eventType", with = FALSE],
                   "\' in module \'", current(sim)[1, "moduleName", with = FALSE], "\'", sep = ""))
   )
   return(invisible(sim))
 }
 
-## event functions
-#   - keep event functions short and clean, modularize by calling subroutines from section below.
-
-### template initialization
-Init <- function(sim) {
-  # # ! ----- EDIT BELOW ----- ! #
-
-  # ! ----- STOP EDITING ----- ! #
-
-  return(invisible(sim))
-}
-
-### template for save events
-Save <- function(sim) {
-  # ! ----- EDIT BELOW ----- ! #
-  # do stuff for this event
-  sim <- saveFiles(sim)
-
-  # ! ----- STOP EDITING ----- ! #
-  return(invisible(sim))
-}
-
-### template for plot events
-plotFun <- function(sim) {
-  # ! ----- EDIT BELOW ----- ! #
-  # do stuff for this event
-  #Plot(sim$object)
-
-  # ! ----- STOP EDITING ----- ! #
-  return(invisible(sim))
-}
-
-### template for your event1
-Event1 <- function(sim) {
-  # ! ----- EDIT BELOW ----- ! #
-  # THE NEXT TWO LINES ARE FOR DUMMY UNIT TESTS; CHANGE OR DELETE THEM.
-  # sim$event1Test1 <- " this is test for event 1. " # for dummy unit test
-  # sim$event1Test2 <- 999 # for dummy unit test
-
-  # ! ----- STOP EDITING ----- ! #
-  return(invisible(sim))
-}
-
-### template for your event2
-Event2 <- function(sim) {
-  # ! ----- EDIT BELOW ----- ! #
-  # THE NEXT TWO LINES ARE FOR DUMMY UNIT TESTS; CHANGE OR DELETE THEM.
-  # sim$event2Test1 <- " this is test for event 2. " # for dummy unit test
-  # sim$event2Test2 <- 777  # for dummy unit test
-
-  # ! ----- STOP EDITING ----- ! #
-  return(invisible(sim))
-}
-
 .inputObjects <- function(sim) {
-  # Any code written here will be run during the simInit for the purpose of creating
-  # any objects required by this module and identified in the inputObjects element of defineModule.
-  # This is useful if there is something required before simulation to produce the module
-  # object dependencies, including such things as downloading default datasets, e.g.,
-  # downloadData("LCC2005", modulePath(sim)).
-  # Nothing should be created here that does not create a named object in inputObjects.
-  # Any other initiation procedures should be put in "init" eventType of the doEvent function.
-  # Note: the module developer can check if an object is 'suppliedElsewhere' to
-  # selectively skip unnecessary steps because the user has provided those inputObjects in the
-  # simInit call, or another module will supply or has supplied it. e.g.,
-  # if (!suppliedElsewhere('defaultColor', sim)) {
-  #   sim$map <- Cache(prepInputs, extractURL('map')) # download, extract, load file from url in sourceURL
-  # }
-
-  #cacheTags <- c(currentModule(sim), "function:.inputObjects") ## uncomment this if Cache is being used
+  cacheTags <- c(currentModule(sim), "function:.inputObjects") ## uncomment this if Cache is being used
   dPath <- asPath(getOption("reproducible.destinationPath", dataPath(sim)), 1)
   message(currentModule(sim), ": using dataPath '", dPath, "'.")
-
-  # ! ----- EDIT BELOW ----- ! #
-
-  # ! ----- STOP EDITING ----- ! #
+  if (!suppliedElsewhere("species", sim = sim)){
+    warning("species was not provided, defaulting to c('REDH','BWTE','BUFF')", 
+            immediate. = TRUE)
+    sim$species <- c("REDH", "BWTE", "BUFF")
+  }
+  if (!suppliedElsewhere("speciesURL", sim = sim)){
+    sim$speciesURL <- data.table(species = c("REDH", "BWTE", "BUFF"),
+                             URL = c("https://drive.google.com/file/d/1JZ6ihDdn_WCSK05SIYrVqDq-YhRoGirj/view?usp=sharing",
+                                     "https://drive.google.com/file/d/1BruuNFQlEw1t9IrYgN_OP3j92rF3ObcZ/view?usp=sharing",
+                                     "https://drive.google.com/file/d/1escVgr4I15iizMYa47M_vBZIKJTunnFt/view?usp=sharing"))
+    sim$speciesURL <- sim$speciesURL[species %in% sim$species, ]
+    if (NROW(sim$speciesURL) == 0) stop("None of the provided species have models")
+    unavail <- setdiff(sim$speciesURL[["species"]], sim$species)
+    if (!length(unavail) == 0) warning(paste0("The following species are not available: ", 
+                                              unavail), 
+                                       immediate. = TRUE)
+  }
+  if (!suppliedElsewhere("studyArea", sim = sim, where = "sim")){
+    if (quickPlot::isRstudioServer()) options(httr_oob_default = TRUE)
+    
+    message("No specific study area was provided. Croping to the Edehzhie Indigenous Protected Area (Southern NWT)")
+    Edehzhie.url <- "https://drive.google.com/open?id=1klq0nhtFJZv47iZVG8_NwcVebbimP8yT"
+    sim$studyArea <- Cache(prepInputs,
+                           url = Edehzhie.url,
+                           destinationPath = inputPath(sim),
+                           omitArgs = c("destinationPath"))
+  }
+  
+  if (!suppliedElsewhere("rasterToMatch", sim = sim, where = "sim")){
+    sim$rasterToMatch <- Cache(prepInputs, url = "https://drive.google.com/open?id=1fo08FMACr_aTV03lteQ7KsaoN9xGx1Df", 
+                               studyArea = sim$studyArea,
+                               targetFile = "RTM.tif", destinationPath = inputPath(sim),
+                               filename2 = NULL,
+                               omitArgs = c("destinationPath", "filename2"))
+  }
   return(invisible(sim))
 }
 

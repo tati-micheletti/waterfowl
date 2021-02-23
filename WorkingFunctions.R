@@ -7,7 +7,7 @@ Require("googledrive")
 
 googledrive::drive_auth(email = "tati.micheletti@gmail.com")
 
-allSpecies <- data.table(species = c("REDH", "BWTE", "BUFF"),
+speciesURL <- data.table(species = c("REDH", "BWTE", "BUFF"),
                          URL = c("https://drive.google.com/file/d/1JZ6ihDdn_WCSK05SIYrVqDq-YhRoGirj/view?usp=sharing",
                                  "https://drive.google.com/file/d/1BruuNFQlEw1t9IrYgN_OP3j92rF3ObcZ/view?usp=sharing",
                                  "https://drive.google.com/file/d/1escVgr4I15iizMYa47M_vBZIKJTunnFt/view?usp=sharing"))
@@ -22,9 +22,9 @@ setPaths(cachePath = "C:/Users/Tati/Google Drive/Postdoc PFC-UBC/WBI/waterfowl/c
 
 # Download the models and data for each species
 
-  speciesPaths <- rbindlist(lapply(1:NROW(allSpecies), function(index){
-    sp <- allSpecies[index, species]
-    URL <- allSpecies[index, URL]
+  speciesPaths <- rbindlist(lapply(1:NROW(speciesURL), function(index){
+    sp <- speciesURL[index, species]
+    URL <- speciesURL[index, URL]
     if (!dir.exists(file.path(Paths$inputPath, 
                    sp))){
       filePath <- file.path(Paths$inputPath,
@@ -67,7 +67,6 @@ prepareBioCov <- function(Decade, climateModel,
                                       fromEnd = TRUE)
   newNames <- paste0("bio", currNames)
   if (any(!is.null(studyArea), !is.null(rasterToMatch))){
-    browser()
     stk[] <- stk[]
     stk <- postProcess(stk, studyArea = studyArea,
                        rasterToMatch = rasterToMatch)
@@ -79,7 +78,7 @@ prepareBioCov <- function(Decade, climateModel,
 # bioCov <- prepareBioCov(Decade = 2050, 
 #                         climateModel = "CCSM4") # NOT WORKING YET
 #                         
-# treeCov <- rasterizeReducedForAllSpecies() # TODO
+# treeCov <- rasterizeReducedForspeciesURL() # TODO
 
 # NEED TO MAKE THE ONES BELOW
 # "SpeciesGroups_Broadleaf_Spp" --> Check exactly what they are!! 
@@ -141,14 +140,14 @@ predictForSpecies <- function(sp,
   return(ensemble_models_proj_future)
 }
 
-allPredictions <- lapply(1:NROW(allSpecies), function(index){
-  sp <- allSpecies[index, species]
+allPredictions <- lapply(1:NROW(speciesURL), function(index){
+  sp <- speciesURL[index, species]
   filePath <- file.path(Paths$inputPath, sp)
-  pred <- predictForSpecies(sp = sp, 
+  pred <- predictBiomod(sp = sp, 
                             inputPath = filePath,
                             bioCov = bioCov,
                             treeCov = treeCov)
 })
-names(allPredictions) <- allSpecies[["species"]]
+names(allPredictions) <- speciesURL[["species"]]
 
 
