@@ -14,7 +14,7 @@ defineModule(sim, list(
   timeunit = "year",
   citation = list("citation.bib"),
   documentation = deparse(list("README.txt", "waterfowl.Rmd")),
-  reqdPkgs = list("biomod2", "raster", "data.table", "googledrive"),
+  reqdPkgs = list("biomod2", "raster", "data.table", "googledrive", "crayon"),
   parameters = rbind(
     defineParameter(".plotInitialTime", "numeric", NA, NA, NA,
                     "Describes the simulation time at which the first plot event should occur."),
@@ -37,7 +37,9 @@ defineModule(sim, list(
                     paste0("Years for which this module should run (i.e. ",
                            "years that should match the predictionsDecades for which data ",
                            "(cohort data and pixelGroup map) are available",
-                           "interval of data saving"))
+                           "interval of data saving")),
+    defineParameter("overwritePred", "logical", FALSE, NA, NA,
+                    paste0("If predictions exist, should be overwritten?"))
   ),
   inputObjects = bindrows(
     expectsInput(objectName = "speciesURL", objectClass = "data.table", 
@@ -57,7 +59,10 @@ defineModule(sim, list(
                  sourceURL = "https://drive.google.com/open?id=1P4grDYDffVyVXvMjM-RwzpuH1deZuvL3"),
     expectsInput(objectName = "rasterToMatch", objectClass = "RasterLayer",
                  desc = "All spatial outputs will be reprojected and resampled to it", 
-                 sourceURL = "https://drive.google.com/open?id=1P4grDYDffVyVXvMjM-RwzpuH1deZuvL3")
+                 sourceURL = "https://drive.google.com/open?id=1P4grDYDffVyVXvMjM-RwzpuH1deZuvL3"),
+    expectsInput(objectName = "climateURLTable", objectClass = "data.table",
+                 desc = "Data.table with information on decade, url and climate model", 
+                 sourceURL = NA)
   ),
   outputObjects = bindrows(
     createsOutput(objectName = "biomassMap", objectClass = "RasterLayer", 
@@ -88,8 +93,7 @@ doEvent.waterfowl = function(sim, eventTime, eventType) {
       sim <- scheduleEvent(sim, P(sim)$decadesMatchingYears[sim$.schedulingCounter], "waterfowl", "updateScheduler")
     },
     modelsPrep = {
-      # Prepare models: download data and return paths
-      browser()
+      # Prepare models: download data
       downloadWaterfowlModels(speciesURL = sim$speciesURL,
                               dataFolder = dataPath(sim))
     },
@@ -98,10 +102,11 @@ doEvent.waterfowl = function(sim, eventTime, eventType) {
       sim$bioCov <- prepareBioCov(Decade = P(sim)$predictionsDecades[which(
                         P(sim)$decadesMatchingYears[sim$.schedulingCounter] == time(sim))],
                         climateModel = "CCSM4",
-                        pathInputs = Paths$inputPath,
+                        pathInputs = dataPath(sim),
                         studyArea = sim$studyArea,
+                        climateURLTable = sim$climateURLTable,
                         rasterToMatch = sim$rasterToMatch) #TODO Add more climate scenarios
-      browser()
+      
       # schedule future event(s)
       sim <- scheduleEvent(sim, P(sim)$decadesMatchingYears[sim$.schedulingCounter + 1], "birdsNWT", "climateDataPrep")
     },
@@ -137,16 +142,20 @@ doEvent.waterfowl = function(sim, eventTime, eventType) {
       }
       sim$treeCov <-  prepareTreeCov(cohortData = mod$cohortData,
                                      pixelGroupMap = mod$pixelGroupMap,
-                                     biomassMap = mod$simulatedBiomassMap)
+                                     biomassMap = mod$simulatedBiomassMap,
+                                     rasterToMatch = sim$rasterToMatch)
       # schedule future event(s)
       sim <- scheduleEvent(sim, P(sim)$decadesMatchingYears[sim$.schedulingCounter + 1], "birdsNWT", "simulatedLayersPrep")
     },
     predictions = {
-      sim$waterfowlPredictions <- lapply(sim$species, function(sp){
+      sim$waterfowlPredictions <- lapply(sim$species, function(sp){ 
+        # TODO Use future for parallelizing
         filePath <- file.path(dataPath(sim), sp)
         pred <- predictBiomod(sp = sp, 
                               inputPath = filePath,
                               bioCov = sim$bioCov,
+                              currentTime = time(sim),
+                              overwritePred = P(sim)$overwritePred,
                               treeCov = sim$treeCov)
         return(pred)
       })
@@ -206,6 +215,14 @@ doEvent.waterfowl = function(sim, eventTime, eventType) {
                                filename2 = NULL,
                                omitArgs = c("destinationPath", "filename2"))
   }
+  if (!suppliedElsewhere("climateURLTable", sim = sim, where = "sim")){
+    sim$climateURLTable <- data.table(decade = c(2050, 2070),
+                                               URL = c("http://biogeo.ucdavis.edu/data/climate/cmip5/5m/cc85bi50.zip", 
+                                                       "http://biogeo.ucdavis.edu/data/climate/cmip5/5m/cc85bi70.zip"),
+                                               climmod = c("CCSM4", 
+                                                           "CCSM4"))
+  }
+  
   return(invisible(sim))
 }
 
