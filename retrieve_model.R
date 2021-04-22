@@ -7,6 +7,8 @@ Require("googledrive")
 
 googledrive::drive_auth(email = "tati.micheletti@gmail.com")
 
+wd <- checkPath(file.path(getwd(), "waterfowl"), create = TRUE)
+
 speciesURL <- data.table(species = c("REDH", "BWTE", "BUFF"),
                          URL = c("https://drive.google.com/file/d/1JZ6ihDdn_WCSK05SIYrVqDq-YhRoGirj/view?usp=sharing",
                                  "https://drive.google.com/file/d/1BruuNFQlEw1t9IrYgN_OP3j92rF3ObcZ/view?usp=sharing",
@@ -14,11 +16,11 @@ speciesURL <- data.table(species = c("REDH", "BWTE", "BUFF"),
 
 covariates <- "https://drive.google.com/file/d/1T729j8czLKugK3yUmJ3SZVLplISQQ6n-/view?usp=sharing"
 
-rasterOptions(tmpdir="C:/Users/Tati/Google Drive/Postdoc PFC-UBC/WBI/waterfowl/rasterTemp")
+rasterOptions(tmpdir = checkPath(file.path(wd, "rasterTemp"), create = TRUE))
 
-setPaths(cachePath = "C:/Users/Tati/Google Drive/Postdoc PFC-UBC/WBI/waterfowl/cache", 
-         inputPath = "C:/Users/Tati/Google Drive/Postdoc PFC-UBC/WBI/waterfowl/inputs",
-         outputPath = "C:/Users/Tati/Google Drive/Postdoc PFC-UBC/WBI/waterfowl/outputs")
+setPaths(cachePath = checkPath(file.path(wd, "cache"), create = TRUE), 
+         inputPath = checkPath(file.path(wd, "inputs"), create = TRUE),
+         outputPath = checkPath(file.path(wd, "outputs"), create = TRUE))
 
 # Download the models and data for each species
 
@@ -75,16 +77,7 @@ prepareBioCov <- function(Decade, climateModel,
   return(stk)
 }
 
-# bioCov <- prepareBioCov(Decade = 2050, 
-#                         climateModel = "CCSM4") # NOT WORKING YET
-#                         
-# treeCov <- rasterizeReducedForspeciesURL() # TODO
-
-# NEED TO MAKE THE ONES BELOW
-# "SpeciesGroups_Broadleaf_Spp" --> Check exactly what they are!! 
-# "SpeciesGroups_Needleleaf_Spp" --> Check exactly what they are!!
-
-# JUST TO TEST. SHOULD BE REMOVED WHEN prepareBioCov() is working
+# TESTING WITH CURRENT VARIABLES
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 allCov <- prepInputs(targetFile = "covariates.rds",
                                     url = covariates, fun = "readRDS", 

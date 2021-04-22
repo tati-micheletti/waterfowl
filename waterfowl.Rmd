@@ -1,6 +1,6 @@
 ---
 title: "waterfowl"
-author: ""
+author: "Tati Micheletti"
 date: "17 February 2021"
 output: pdf_document
 editor_options:
