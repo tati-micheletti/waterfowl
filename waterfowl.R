@@ -48,7 +48,7 @@ defineModule(sim, list(
                                "fitted models from biomod2 were saved). It is ",
                                "important that the structure of the models is ",
                                "kept intact as the predict function depends on ",
-                               "it."), 
+                               "it."),
                  sourceURL = NA),
     expectsInput(objectName = "species", objectClass = "character", 
                  desc = paste0("Character vector with species (4-letter code). ",
@@ -98,6 +98,7 @@ doEvent.waterfowl = function(sim, eventTime, eventType) {
                               dataFolder = dataPath(sim))
     },
     climateDataPrep = {
+
       # Prepare climate data
       sim$bioCov <- prepareBioCov(Decade = P(sim)$predictionsDecades[which(
                         P(sim)$decadesMatchingYears[sim$.schedulingCounter] == time(sim))],
@@ -187,9 +188,9 @@ doEvent.waterfowl = function(sim, eventTime, eventType) {
   }
   if (!suppliedElsewhere("speciesURL", sim = sim)){
     sim$speciesURL <- data.table(species = c("REDH", "BWTE", "BUFF"),
-                             URL = c("https://drive.google.com/file/d/1JZ6ihDdn_WCSK05SIYrVqDq-YhRoGirj/view?usp=sharing",
-                                     "https://drive.google.com/file/d/1BruuNFQlEw1t9IrYgN_OP3j92rF3ObcZ/view?usp=sharing",
-                                     "https://drive.google.com/file/d/1escVgr4I15iizMYa47M_vBZIKJTunnFt/view?usp=sharing"))
+                             URL = c("https://drive.google.com/file/d/1Sw8V93gv3eJNTuCeD3ZD6jRScVR5h-Yb/view?usp=sharing",
+                                     "https://drive.google.com/file/d/1G7Zq5BBgQtoxBgiGJmojbbIZpb8vZY9I/view?usp=sharing",
+                                     "https://drive.google.com/file/d/1C-oTdV9yzS6OEiO_fan7uoVACL-d1ajD/view?usp=sharing"))
     sim$speciesURL <- sim$speciesURL[species %in% sim$species, ]
     if (NROW(sim$speciesURL) == 0) stop("None of the provided species have models")
     unavail <- setdiff(sim$speciesURL[["species"]], sim$species)
