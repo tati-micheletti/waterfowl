@@ -13,34 +13,46 @@ knitr::opts_chunk$set(echo = TRUE, results = "hold")
 
 # Overview
 
-Provide an overview of what the module does / how to use the module.
-
-Module documentation should be written so that others can use your module.
-This is a template for module documentation, and should be changed to reflect your module.
-
-## R Markdown
-
-R Markdown syntax allows R code, outputs, and figures to be rendered in the documentation.
-
-For help writing in R Markdown, see https://rmarkdown.rstudio.com/.
+This module forecasts waterfowl habitat suitability index for up to 17 species of waterfowl for a given study area within the Western Boreal Region.
 
 # Usage
 
+The following inputs are expected (but do present defaults if not provided):  
+
+*speciesURL:*  Data.table with 2 columns, species (4-letter code) and URL (url of google drive FOLDER where the fitted models from biomod2 were saved). It is important that the structure of the models is kept intact as the predict function depends on it.  
+*species:* Character vector with species (4-letter code). These need to be available in speciesURL table.  
+*studyArea:* Study area for the prediction. Defaults to the NWT.
+*rasterToMatch:* All spatial outputs will be reprojected and resampled to it (i.e. projection and resolution).
+*climateURLTable:* Data.table with information on decade, url and climate model.
+
+studyAreaWBI_url <- "https://drive.google.com/file/d/19agsb9pzqsS_ZW7aS4MHa4QUiEp3R4fj/view?usp=sharing"
+
+```{r setup}
+library("Require")
+Require("SpaDES")
+Require("data.table")
+Require("googledrive")
+Require("raster")
+Require("biomod2")
+
+wd <- checkPath(file.path(getwd(), "waterfowl"), create = TRUE)
+
+rasterOptions(tmpdir = checkPath(file.path(wd, "rasterTemp"), create = TRUE))
+
+setPaths(cachePath = checkPath(file.path(wd, "cache"), create = TRUE), 
+         inputPath = checkPath(file.path(wd, "inputs"), create = TRUE),
+         outputPath = checkPath(file.path(wd, "outputs"), create = TRUE))
+
+```
+
+If you want to run future predictions, run the following code:
+
 ```{r module_usage}
-library(SpaDES.core)
 
-setPaths(modulePath = file.path("C:/Users/Tati/Documents/GitHub/waterfowl"))
-getPaths() # shows where the 4 relevant paths are
+times <- list(start = 2050, end = 2070)
 
-times <- list(start = 0, end = 10)
-
-parameters <- list(
-  #.progress = list(type = "text", interval = 1), # for a progress bar
-  ## If there are further modules, each can have its own set of parameters:
-  #module1 = list(param1 = value1, param2 = value2),
-  #module2 = list(param1 = value1, param2 = value2)
-)
 modules <- list("waterfowl")
+
 objects <- list()
 inputs <- list()
 outputs <- list()
@@ -51,48 +63,103 @@ mySim <- simInit(times = times, params = parameters, modules = modules,
 mySimOut <- spades(mySim)
 ```
 
-# Parameters
+It is also possible to assess this model for current time (i.e. 2011), albeit outside of the forecasting SpaDES module:
 
-Provide a summary of user-visible parameters.
+```{r run2011}
 
-```{r moduleParams, echo = FALSE}
-df_params <- moduleParams("waterfowl", "C:/Users/Tati/Documents/GitHub/waterfowl")
-knitr::kable(df_params)
+speciesURL <- data.table(species = c("REDH", "BWTE", "BUFF"),
+                         URL = c("https://drive.google.com/file/d/1Sw8V93gv3eJNTuCeD3ZD6jRScVR5h-Yb/view?usp=sharing",
+                                 "https://drive.google.com/file/d/1G7Zq5BBgQtoxBgiGJmojbbIZpb8vZY9I/view?usp=sharing",
+                                 "https://drive.google.com/file/d/1C-oTdV9yzS6OEiO_fan7uoVACL-d1ajD/view?usp=sharing"))
+
+covariates <- "https://drive.google.com/file/d/1UXl5zBG9D39G9FpJeCYbD3RU6WA6LNq9/view?usp=sharing"
+
+# Download the models and data for each species
+  speciesPaths <- rbindlist(lapply(1:NROW(speciesURL), function(index){
+    sp <- speciesURL[index, species]
+    URL <- speciesURL[index, URL]
+    if (!dir.exists(file.path(Paths$inputPath, 
+                   sp))){
+      filePath <- file.path(Paths$inputPath,
+                            paste0(sp, ".zip"))
+      
+      drive_download(file = URL, path = filePath)
+      unzip(zipfile = filePath, exdir = Paths$inputPath)
+      speciesPath <- data.table(species = sp,
+                                spInputPath = file.path(Paths$inputPath, 
+                                                        sp))
+      } else {
+      speciesPath <- data.table(species = sp,
+                                spInputPath = file.path(Paths$inputPath, 
+                                                        sp))
+    } 
+    return(speciesPath)
+  }))
+
+# Retrieve current environmental covariate layers
+allCov <- prepInputs(targetFile = "covariates.rds",
+                                    url = covariates, fun = "readRDS", 
+                                    destinationPath = Paths$inputPath) # For now use the ready covars
+bioCov <- raster::subset(allCov, names(allCov)[1:19])
+treeCov <- raster::subset(allCov, names(allCov)[20:nlayers(allCov)])
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+## For each species, make new projections
+predictForSpecies <- function(sp, 
+                              inputPath,
+                              bioCov,
+                              treeCov){
+  message(crayon::yellow(paste0("Predictions starting for ", sp, "...")))
+  originalWD <- getwd()
+  on.exit(setwd(originalWD))
+  fl <- list.files(path = inputPath, 
+                   pattern = "FirstModeling.models.out",
+                   full.names = TRUE, 
+                   recursive = TRUE)
+  modInd <- get(load(file = fl))
+  # Needs to decompress
+  fls <- list.files(path = inputPath, pattern = "gz",
+                   full.names = TRUE, 
+                   recursive = TRUE)
+  if (any(unique(tools::file_ext(fls)) %in% "gz")){
+    lapply(fls, R.utils::gunzip)
+  }
+  setwd(Paths$inputPath)
+  biomod2::BIOMOD_LoadModels(modInd)
+  sel.cov <- modInd@expl.var.names
+  currentStack <- raster::stack(bioCov, treeCov)
+  current.env.stack <- stack(currentStack[[which(names(currentStack) %in% sel.cov)]])
+  models_proj_future <- BIOMOD_Projection(modeling.output = modInd,
+                                          new.env = current.env.stack,
+                                          proj.name = "future",
+                                          binary.meth = "TSS", # or ROC ...
+                                          output.format = ".grd",
+                                          do.stack = TRUE)
+  fl <- list.files(path = inputPath, 
+                   pattern = "FirstModelingensemble.models.out",
+                   full.names = TRUE, 
+                   recursive = TRUE)
+  modEns <- get(load(file = fl))
+  ## Ensemble projections
+  ensemble_models_proj_future <-BIOMOD_EnsembleForecasting(EM.output = modEns,
+                                                           projection.output = models_proj_future,
+                                                           binary.meth = "TSS", # or ROC ...
+                                                           output.format = ".grd",
+                                                           do.stack = FALSE)/1000 # Correcting for integer forcing
+  
+  message(crayon::green(paste0("Predictions done for ", sp)))
+  return(ensemble_models_proj_future)
+}
+
+allPredictions <- lapply(1:NROW(speciesURL), function(index){
+  sp <- speciesURL[index, species]
+  filePath <- file.path(Paths$inputPath, sp)
+  pred <- predictForSpecies(sp = sp, 
+                            inputPath = filePath,
+                            bioCov = bioCov,
+                            treeCov = treeCov)
+})
+names(allPredictions) <- speciesURL[["species"]]
+
 ```
 
-# Events
-
-Describe what happens for each event type.
-
-## Plotting
-
-Write what is plotted.
-
-## Saving
-
-Write what is saved.
-
-# Data dependencies
-
-## Input data
-
-How to obtain input data, and a description of the data required by the module.
-If `sourceURL` is specified, `downloadData("waterfowl", "C:/Users/Tati/Documents/GitHub/waterfowl")` may be sufficient.
-
-```{r moduleInputs, echo = FALSE}
-df_inputs <- moduleInputs("waterfowl", "C:/Users/Tati/Documents/GitHub/waterfowl")
-knitr::kable(df_inputs)
-```
-
-## Output data
-
-Description of the module outputs.
-
-```{r moduleOutputs, echo = FALSE}
-df_outputs <- moduleOutputs("waterfowl", "C:/Users/Tati/Documents/GitHub/waterfowl")
-knitr::kable(df_outputs)
-```
-
-# Links to other modules
-
-Describe any anticipated linkages to other modules.
