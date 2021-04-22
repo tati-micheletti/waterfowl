@@ -10,11 +10,11 @@ googledrive::drive_auth(email = "tati.micheletti@gmail.com")
 wd <- checkPath(file.path(getwd(), "waterfowl"), create = TRUE)
 
 speciesURL <- data.table(species = c("REDH", "BWTE", "BUFF"),
-                         URL = c("https://drive.google.com/file/d/1JZ6ihDdn_WCSK05SIYrVqDq-YhRoGirj/view?usp=sharing",
-                                 "https://drive.google.com/file/d/1BruuNFQlEw1t9IrYgN_OP3j92rF3ObcZ/view?usp=sharing",
-                                 "https://drive.google.com/file/d/1escVgr4I15iizMYa47M_vBZIKJTunnFt/view?usp=sharing"))
+                         URL = c("https://drive.google.com/file/d/1Sw8V93gv3eJNTuCeD3ZD6jRScVR5h-Yb/view?usp=sharing",
+                                 "https://drive.google.com/file/d/1G7Zq5BBgQtoxBgiGJmojbbIZpb8vZY9I/view?usp=sharing",
+                                 "https://drive.google.com/file/d/1C-oTdV9yzS6OEiO_fan7uoVACL-d1ajD/view?usp=sharing"))
 
-covariates <- "https://drive.google.com/file/d/1T729j8czLKugK3yUmJ3SZVLplISQQ6n-/view?usp=sharing"
+covariates <- "https://drive.google.com/file/d/1UXl5zBG9D39G9FpJeCYbD3RU6WA6LNq9/view?usp=sharing"
 
 rasterOptions(tmpdir = checkPath(file.path(wd, "rasterTemp"), create = TRUE))
 
@@ -136,7 +136,7 @@ predictForSpecies <- function(sp,
 allPredictions <- lapply(1:NROW(speciesURL), function(index){
   sp <- speciesURL[index, species]
   filePath <- file.path(Paths$inputPath, sp)
-  pred <- predictBiomod(sp = sp, 
+  pred <- predictForSpecies(sp = sp, 
                             inputPath = filePath,
                             bioCov = bioCov,
                             treeCov = treeCov)
